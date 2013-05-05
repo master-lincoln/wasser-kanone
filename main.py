@@ -7,7 +7,7 @@ from ola.ClientWrapper import ClientWrapper
 
 class Target:
 
-    width, height = 1280, 720
+    width, height = 640, 480
 
     center = (125, 40)
     topRight = (115, 52)
@@ -52,9 +52,11 @@ class Target:
         self.wrapper.Run()
 
     def run(self):
+        self.wrapper = ClientWrapper()
+        self.client = self.wrapper.Client()
         i = 0
         while True:
-            if (++i > 3): i = 0
+            if (++i > 10): i = 0
 
             img = cv.QueryFrame(self.capture)
 
@@ -71,7 +73,7 @@ class Target:
             #both turples which is the hue range(120,140).  OpenCV uses 0-180 as
             #a hue range for the HSV color model
             thresholded_img = cv.CreateImage(cv.GetSize(hsv_img), 8, 1)
-            cv.InRangeS(hsv_img, (0, 80, 80), (10, 255, 255), thresholded_img)
+            cv.InRangeS(hsv_img, (115, 100, 50), (120, 255, 255), thresholded_img)
 
             #determine the objects moments and check that the area is large
             #enough to be our object
@@ -87,6 +89,12 @@ class Target:
                 y = cv.GetSpatialMoment(moments, 0, 1)/area
 
                 print 'x: ' + str(x) + ' y: ' + str(y) + ' area: ' + str(area)
+
+                xRange = self.bottomLeft[0] - self.topRight[0]
+                yRange = self.topRight[1] - self.bottomLeft[1]
+                dmxCoordinate = (int(self.bottomLeft[0] - (x / self.width) * xRange), int(self.topRight[1] - (y / self.height) * yRange))
+
+                self.moveDmxTo(dmxCoordinate)
 
                 #create an overlay to mark the center of the tracked object
                 overlay = cv.CreateImage(cv.GetSize(img), 8, 3)
