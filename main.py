@@ -52,89 +52,55 @@ class Target:
         self.wrapper.Run()
 
     def run(self):
-        # Capture first frame to get size
-        frame = cv.QueryFrame(self.capture)
-        frame_size = cv.GetSize(frame)
-        color_image = cv.CreateImage(cv.GetSize(frame), 8, 3)
-        grey_image = cv.CreateImage(cv.GetSize(frame), cv.IPL_DEPTH_8U, 1)
-        moving_average = cv.CreateImage(cv.GetSize(frame), cv.IPL_DEPTH_32F, 3)
-
-        self.wrapper = ClientWrapper()
-        self.client = self.wrapper.Client()
-
-        first = True
         i = 0
         while True:
-            closest_to_left = cv.GetSize(frame)[0]
-            closest_to_right = cv.GetSize(frame)[1]
-            i = i+1
-            color_image = cv.QueryFrame(self.capture)
+            if (++i > 3): i = 0
 
-            # Smooth to get rid of false positives
-            cv.Smooth(color_image, color_image, cv.CV_GAUSSIAN, 3, 0)
+            img = cv.QueryFrame(self.capture)
 
-            if first:
-                difference = cv.CloneImage(color_image)
-                temp = cv.CloneImage(color_image)
-                cv.ConvertScale(color_image, moving_average, 1.0, 0.0)
-                first = False
-            else:
-                cv.RunningAvg(color_image, moving_average, 0.020, None)
+            #blur the source image to reduce color noise
+            cv.Smooth(img, img, cv.CV_BLUR, 3)
 
-            # Convert the scale of the moving average.
-            cv.ConvertScale(moving_average, temp, 1.0, 0.0)
+            #convert the image to hsv(Hue, Saturation, Value) so its
+            #easier to determine the color to track(hue)
+            hsv_img = cv.CreateImage(cv.GetSize(img), 8, 3)
+            cv.CvtColor(img, hsv_img, cv.CV_BGR2HSV)
 
-            # Minus the current frame from the moving average.
-            cv.AbsDiff(color_image, temp, difference)
+            #limit all pixels that don't match our criteria, in this case we are
+            #looking for purple but if you want you can adjust the first value in
+            #both turples which is the hue range(120,140).  OpenCV uses 0-180 as
+            #a hue range for the HSV color model
+            thresholded_img = cv.CreateImage(cv.GetSize(hsv_img), 8, 1)
+            cv.InRangeS(hsv_img, (0, 80, 80), (10, 255, 255), thresholded_img)
 
-            # Convert the image to grayscale.
-            cv.CvtColor(difference, grey_image, cv.CV_RGB2GRAY)
+            #determine the objects moments and check that the area is large
+            #enough to be our object
+            mat = cv.GetMat(thresholded_img)
+            moments = cv.Moments(mat, 0)
+            area = cv.GetCentralMoment(moments, 0, 0)
 
-            # Convert the image to black and white.
-            cv.Threshold(grey_image, grey_image, 70, 255, cv.CV_THRESH_BINARY)
+            #there can be noise in the video so ignore objects with small areas
+            if(area > 100000):
+                #determine the x and y coordinates of the center of the object
+                #we are tracking by dividing the 1, 0 and 0, 1 moments by the area
+                x = cv.GetSpatialMoment(moments, 1, 0)/area
+                y = cv.GetSpatialMoment(moments, 0, 1)/area
 
-            # Dilate and erode to get people blobs
-            cv.Dilate(grey_image, grey_image, None, 18)
-            cv.Erode(grey_image, grey_image, None, 10)
+                print 'x: ' + str(x) + ' y: ' + str(y) + ' area: ' + str(area)
 
-            storage = cv.CreateMemStorage(0)
-            contour = cv.FindContours(grey_image, storage, cv.CV_RETR_CCOMP, cv.CV_CHAIN_APPROX_SIMPLE)
-            points = []
+                #create an overlay to mark the center of the tracked object
+                overlay = cv.CreateImage(cv.GetSize(img), 8, 3)
 
-            while contour:
+                cv.Circle(overlay, (int(x), int(y)), 2, (255, 255, 255), 20)
+                cv.Add(img, overlay, img)
+                #add the thresholded image back to the img so we can see what was
+                #left after it was applied
+                cv.Merge(thresholded_img, None, None, None, img)
 
-                bound_rect = cv.BoundingRect(list(contour))
-                contour = contour.h_next()
+            #display the image
+            cv.ShowImage("Target", img)
 
-                pt1 = (bound_rect[0], bound_rect[1])
-                pt2 = (bound_rect[0] + bound_rect[2], bound_rect[1] + bound_rect[3])
-                points.append(pt1)
-                points.append(pt2)
-                #cv.Rectangle(color_image, pt1, pt2, cv.CV_RGB(255,0,0), 1)
-
-            if (len(points) and i > 2):
-                i = 0
-                center_point = reduce(lambda a, b: ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), points)
-
-                xRange = self.bottomLeft[0] - self.topRight[0]
-                yRange = self.topRight[1] - self.bottomLeft[1]
-
-                # x = lowestValue + (center_point[0] / width) * xRange
-                dmxCoordinate = (int(self.bottomLeft[0] - (float(center_point[0]) / self.width) * xRange), int(self.topRight[1] - (float(center_point[1]) / self.height) * yRange))
-
-                print dmxCoordinate, "bei: ", center_point
-                self.moveDmxTo(dmxCoordinate)
-
-                cv.Circle(color_image, center_point, 40, cv.CV_RGB(255, 255, 255), 1)
-                cv.Circle(color_image, center_point, 30, cv.CV_RGB(255, 100, 0), 1)
-                #cv.Circle(color_image, center_point, 20, cv.CV_RGB(255, 255, 255), 1)
-                #cv.Circle(color_image, center_point, 10, cv.CV_RGB(255, 100, 0), 1)
-
-            cv.ShowImage("Target", color_image)
-
-            # Listen for ESC key
-            c = cv.WaitKey(7) % 0x100
-            if c == 27:
+            if cv.WaitKey(10) == 27:
                 break
 
 if __name__ == "__main__":
