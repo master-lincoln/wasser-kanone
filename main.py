@@ -7,10 +7,11 @@ from ola.ClientWrapper import ClientWrapper
 
 class Target:
 
-    width, height = 640, 480
+    #width, height = 640, 480
+    width, height = 1280, 720
 
     center = (125, 40)
-    topRight = (115, 52)
+    topRight = (113, 52)
     bottomLeft = (137, 21)
 
     def __init__(self):
@@ -29,12 +30,19 @@ class Target:
         return val
 
     def moveDmxTo(self, position):
-        position = (self.restrict(position[0], 0, 255), self.restrict(position[1], 0, 255))
+        #position = (self.restrict(position[0], 0, 255), self.restrict(position[1], 0, 255))
         data = array.array('B')
-        data.append(position[0])
-        data.append(0)
-        data.append(position[1])
-        data.append(0)
+        pan = self.restrict(position[0] >> 8, 0, 255)
+        panFine = self.restrict(0xFF & position[0], 0, 255)
+        tilt = self.restrict(position[1] >> 8, 0, 255)
+        tiltFine = self.restrict(0xFF & position[1], 0, 255)
+
+        print "pan: ", pan, " panFine: ", panFine, " tilt: ", tilt, " tiltFine: ", tiltFine
+
+        data.append(pan)
+        data.append(panFine)
+        data.append(tilt)
+        data.append(tiltFine)
         data.append(255)
         data.append(134)
         data.append(0)
@@ -56,7 +64,7 @@ class Target:
         self.client = self.wrapper.Client()
         i = 0
         while True:
-            if (++i > 10): i = 0
+            if (++i > 7): i = 0
 
             img = cv.QueryFrame(self.capture)
 
@@ -72,8 +80,14 @@ class Target:
             #looking for purple but if you want you can adjust the first value in
             #both turples which is the hue range(120,140).  OpenCV uses 0-180 as
             #a hue range for the HSV color model
+            # Orange  0-22
+            # Yellow 22- 38
+            # Green 38-75
+            # Blue 75-130
+            # Violet 130-160
+            # Red 160-179
             thresholded_img = cv.CreateImage(cv.GetSize(hsv_img), 8, 1)
-            cv.InRangeS(hsv_img, (115, 100, 50), (120, 255, 255), thresholded_img)
+            cv.InRangeS(hsv_img, (75, 100, 100), (130, 255, 255), thresholded_img)
 
             #determine the objects moments and check that the area is large
             #enough to be our object
@@ -88,11 +102,12 @@ class Target:
                 x = cv.GetSpatialMoment(moments, 1, 0)/area
                 y = cv.GetSpatialMoment(moments, 0, 1)/area
 
-                print 'x: ' + str(x) + ' y: ' + str(y) + ' area: ' + str(area)
+                #print 'x: ' + str(x) + ' y: ' + str(y) + ' area: ' + str(area)
 
-                xRange = self.bottomLeft[0] - self.topRight[0]
-                yRange = self.topRight[1] - self.bottomLeft[1]
-                dmxCoordinate = (int(self.bottomLeft[0] - (x / self.width) * xRange), int(self.topRight[1] - (y / self.height) * yRange))
+                xRange = (self.bottomLeft[0] << 8) - (self.topRight[0] << 8)
+                yRange = (self.topRight[1] << 8) - (self.bottomLeft[1] << 8)
+                #print "xRange: ", xRange, " yRange: ", yRange
+                dmxCoordinate = (int((self.bottomLeft[0] << 8) - (x / self.width) * xRange), int((self.topRight[1] << 8) - (y / self.height) * yRange))
 
                 self.moveDmxTo(dmxCoordinate)
 
@@ -108,7 +123,12 @@ class Target:
             #display the image
             cv.ShowImage("Target", img)
 
+            del(img)
+            del(hsv_img)
+            del(thresholded_img)
+
             if cv.WaitKey(10) == 27:
+                del self.capture
                 break
 
 if __name__ == "__main__":
