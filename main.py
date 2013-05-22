@@ -10,9 +10,10 @@ class Target:
     #width, height = 640, 480
     width, height = 1280, 720
 
-    center = (125, 40)
-    topRight = (113, 52)
-    bottomLeft = (137, 21)
+    center = (41, 38)
+    topRight = (31, 48)
+    bottomLeft = (53, 18)
+    dmxCoordinate = (41, 38)
 
     def __init__(self):
         # self.capture = cv.CaptureFromCAM(1)
@@ -29,28 +30,29 @@ class Target:
         if val > maxval: return maxval
         return val
 
-    def moveDmxTo(self, position):
+    def moveDmxTo(self, position, lamp):
         #position = (self.restrict(position[0], 0, 255), self.restrict(position[1], 0, 255))
         data = array.array('B')
         pan = self.restrict(position[0] >> 8, 0, 255)
         panFine = self.restrict(0xFF & position[0], 0, 255)
         tilt = self.restrict(position[1] >> 8, 0, 255)
         tiltFine = self.restrict(0xFF & position[1], 0, 255)
+        dimmer = (9 if lamp else 0)
 
         print "pan: ", pan, " panFine: ", panFine, " tilt: ", tilt, " tiltFine: ", tiltFine
 
-        data.append(pan)
-        data.append(panFine)
-        data.append(tilt)
-        data.append(tiltFine)
-        data.append(255)
-        data.append(134)
-        data.append(0)
-        data.append(0)
-        data.append(0)
-        data.append(0)
-        data.append(0)
-        data.append(0)
+        data.append(pan)        #pan
+        data.append(panFine)    #panFine
+        data.append(tilt)       #tilt
+        data.append(tiltFine)   #tiltfine
+        data.append(8)        #vectorSpeed
+        data.append(dimmer)        #dimmer
+        data.append(255)        #red
+        data.append(32)        #green
+        data.append(0)         #blue
+        data.append(0)          #colorMacros
+        data.append(0)          #vectorSpeedColor
+        data.append(0)          #moveMentMacros
         data.append(0)
         data.append(0)
         data.append(0)
@@ -87,7 +89,7 @@ class Target:
             # Violet 130-160
             # Red 160-179
             thresholded_img = cv.CreateImage(cv.GetSize(hsv_img), 8, 1)
-            cv.InRangeS(hsv_img, (75, 100, 100), (130, 255, 255), thresholded_img)
+            cv.InRangeS(hsv_img, (160, 80, 80), (179, 255, 255), thresholded_img)
 
             #determine the objects moments and check that the area is large
             #enough to be our object
@@ -107,9 +109,9 @@ class Target:
                 xRange = (self.bottomLeft[0] << 8) - (self.topRight[0] << 8)
                 yRange = (self.topRight[1] << 8) - (self.bottomLeft[1] << 8)
                 #print "xRange: ", xRange, " yRange: ", yRange
-                dmxCoordinate = (int((self.bottomLeft[0] << 8) - (x / self.width) * xRange), int((self.topRight[1] << 8) - (y / self.height) * yRange))
+                self.dmxCoordinate = (int((self.bottomLeft[0] << 8) - (x / self.width) * xRange), int((self.topRight[1] << 8) - (y / self.height) * yRange))
 
-                self.moveDmxTo(dmxCoordinate)
+                self.moveDmxTo(self.dmxCoordinate, True)
 
                 #create an overlay to mark the center of the tracked object
                 overlay = cv.CreateImage(cv.GetSize(img), 8, 3)
@@ -119,6 +121,8 @@ class Target:
                 #add the thresholded image back to the img so we can see what was
                 #left after it was applied
                 cv.Merge(thresholded_img, None, None, None, img)
+            else:
+                self.moveDmxTo(self.dmxCoordinate, False)
 
             #display the image
             cv.ShowImage("Target", img)
@@ -127,7 +131,7 @@ class Target:
             del(hsv_img)
             del(thresholded_img)
 
-            if cv.WaitKey(10) == 27:
+            if cv.WaitKey(150) == 27:
                 del self.capture
                 break
 
