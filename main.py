@@ -2,18 +2,28 @@
 
 import cv
 import array
+import socket
+import sys
+import time
 from ola.ClientWrapper import ClientWrapper
 
 
 class Target:
 
+    # for testing
+    pump = True
+    dmx = True
+
+    server_address = ('192.168.0.99', 10000)
+
     #width, height = 640, 480
     width, height = 1280, 720
+    skipPictures = 1
 
-    center = (41, 38)
+    center = (41 << 8, 38 << 8)
     topRight = (31, 48)
     bottomLeft = (53, 18)
-    dmxCoordinate = (41, 38)
+    dmxCoordinate = center
 
     def __init__(self):
         # self.capture = cv.CaptureFromCAM(1)
@@ -21,6 +31,27 @@ class Target:
         cv.SetCaptureProperty(self.capture, cv.CV_CAP_PROP_FRAME_WIDTH, self.width)
         cv.SetCaptureProperty(self.capture, cv.CV_CAP_PROP_FRAME_HEIGHT, self.height)
         cv.NamedWindow("Target", 1)
+        # Create a TCP/IP socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # Connect the socket to the port where the server is listening
+        print >>sys.stderr, 'connecting to %s port %s' % self.server_address
+        self.sock.connect(self.server_address)
+
+        self.startTime = time.clock()
+
+    def sendFire(self):
+        elapsed = (time.clock() - self.startTime)
+        #print "elapsed: %fs" % elapsed
+        if (elapsed > 1):
+            self.startTime = time.clock()
+            try:
+                # Send data
+                print 'sending fire command'
+                self.sock.sendall('f')
+
+            except Exception, e:
+                print>>sys.stderr, "Error:", e
 
     def _DmxSent(self, state):
         self.wrapper.Stop()
@@ -39,7 +70,7 @@ class Target:
         tiltFine = self.restrict(0xFF & position[1], 0, 255)
         dimmer = (9 if lamp else 0)
 
-        print "pan: ", pan, " panFine: ", panFine, " tilt: ", tilt, " tiltFine: ", tiltFine
+        #print "pan: ", pan, " panFine: ", panFine, " tilt: ", tilt, " tiltFine: ", tiltFine
 
         data.append(pan)        #pan
         data.append(panFine)    #panFine
@@ -66,7 +97,7 @@ class Target:
         self.client = self.wrapper.Client()
         i = 0
         while True:
-            if (++i > 7): i = 0
+            if (++i > self.skipPictures): i = 0
 
             img = cv.QueryFrame(self.capture)
 
@@ -111,7 +142,10 @@ class Target:
                 #print "xRange: ", xRange, " yRange: ", yRange
                 self.dmxCoordinate = (int((self.bottomLeft[0] << 8) - (x / self.width) * xRange), int((self.topRight[1] << 8) - (y / self.height) * yRange))
 
-                self.moveDmxTo(self.dmxCoordinate, True)
+                if self.dmx:
+                    self.moveDmxTo(self.dmxCoordinate, True)
+                if self.pump:
+                    self.sendFire()
 
                 #create an overlay to mark the center of the tracked object
                 overlay = cv.CreateImage(cv.GetSize(img), 8, 3)
@@ -133,6 +167,10 @@ class Target:
 
             if cv.WaitKey(150) == 27:
                 del self.capture
+                # close socket connection
+                print >>sys.stderr, 'closing socket'
+                sock.close()
+
                 break
 
 if __name__ == "__main__":
