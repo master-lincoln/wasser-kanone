@@ -11,6 +11,9 @@ from ola.ClientWrapper import ClientWrapper
 
 class Target:
 
+    gobos = {'circle': 0, 'pfeilkreis': 10, 'blasen': 18, 'tribal': 25, 'wirbel': 35, 'parkett': 45, 'dreiecke': 55, 'spirale': 60, 'punkte': 65, 'wald': 75}
+
+
     # for testing
     pump = True
     dmx = True
@@ -18,15 +21,29 @@ class Target:
     server_address = ('192.168.0.99', 10000)
 
     #width, height = 640, 480
-    width, height = 1280, 720
+    width, height = 800, 600
     skipPictures = 1
-    offset = 7
+    offset = 0
+    area = 900000
 
-    center = (41 << 8, 38 << 8)
-    topRight = (31, 48)
-    bottomLeft = (50, 18)
+    # limit all pixels that don't match our criteria
+    # OpenCV uses 0-180 as a hue range for the HSV color model
+    # Orange  0-22
+    # Yellow 22- 38
+    # Green 38-75
+    # Blue 75-130
+    # Violet 130-160
+    # Red 160-179
+    colorLower = [0, 20, 65]
+    colorUpper = [18, 255, 119]
+
+    center = (41 << 8, 21 << 8)
+    topRight = (32, 33)
+    bottomLeft = (53, 12)
     dmxCoordinate = center
     lastPosition = center
+
+    gobo = gobos['blasen']
 
     def __init__(self):
         # self.capture = cv.CaptureFromCAM(1)
@@ -34,6 +51,14 @@ class Target:
         cv.SetCaptureProperty(self.capture, cv.CV_CAP_PROP_FRAME_WIDTH, self.width)
         cv.SetCaptureProperty(self.capture, cv.CV_CAP_PROP_FRAME_HEIGHT, self.height)
         cv.NamedWindow("Target", 1)
+
+        # Trackbars for calibration
+        # TODO set initial values from self.area, self.colorLower, self.colorUpper
+        cv.CreateTrackbar("Area", "Target", 0, 20, self.setArea)
+        cv.CreateTrackbar("MinColor", "Target", 0, 180, self.setMinCol)
+        cv.CreateTrackbar("MaxColor", "Target", 0, 180, self.setMaxCol)
+        cv.CreateTrackbar("MinVal", "Target", 0, 255, self.setMinVal)
+        cv.CreateTrackbar("MaxVal", "Target", 0, 255, self.setMaxVal)
         # Create a TCP/IP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -42,6 +67,21 @@ class Target:
         self.sock.connect(self.server_address)
 
         self.startTime = time.clock()
+
+    def setArea(self, value):
+        self.area = 100000 * value + 100000
+
+    def setMinCol(self, value):
+        self.colorLower[0] = value
+
+    def setMaxCol(self, value):
+        self.colorUpper[0] = value
+
+    def setMinVal(self, value):
+        self.colorLower[2] = value
+
+    def setMaxVal(self, value):
+        self.colorUpper[2] = value
 
     def sendFire(self):
         elapsed = (time.clock() - self.startTime)
@@ -74,7 +114,7 @@ class Target:
         dimmer = (9 if lamp else 0)
 
         difference = max(math.fabs(position[0] - self.lastPosition[0]), math.fabs(position[1] - self.lastPosition[1]))
-        print difference
+        #print difference
 
         if (difference > 50):
             pass 
@@ -93,7 +133,7 @@ class Target:
         data.append(0)          #colorMacros
         data.append(0)          #vectorSpeedColor
         data.append(0)          #moveMentMacros
-        data.append(0)
+        data.append(self.gobo)          #gobo
         data.append(0)
         data.append(0)
         data.append(0)
@@ -103,6 +143,16 @@ class Target:
 
         self.lastPosition = position
 
+    def mouse_callback(self, event,x,y,flags,param):
+        if event==cv.CV_EVENT_LBUTTONDBLCLK:
+            print "click at (" +str(x)+", "+str(y)+")"
+            self.getColor(x,y)
+            #print x,y
+
+    def getColor(self, x, y):
+        print cv.Get2D(img, y, x)
+        #print 'Hue: %d Saturation %d Value: %d' % hue, sat, val
+
     def run(self):
         self.wrapper = ClientWrapper()
         self.client = self.wrapper.Client()
@@ -110,28 +160,20 @@ class Target:
         while True:
             if (++i > self.skipPictures): i = 0
 
-            img = cv.QueryFrame(self.capture)
+            self.img = cv.QueryFrame(self.capture)
+
+            cv.Flip(self.img, flipMode=-1)
 
             #blur the source image to reduce color noise
-            cv.Smooth(img, img, cv.CV_BLUR, 3)
+            cv.Smooth(self.img, self.img, cv.CV_BLUR, 3)
 
             #convert the image to hsv(Hue, Saturation, Value) so its
             #easier to determine the color to track(hue)
-            hsv_img = cv.CreateImage(cv.GetSize(img), 8, 3)
-            cv.CvtColor(img, hsv_img, cv.CV_BGR2HSV)
+            hsv_img = cv.CreateImage(cv.GetSize(self.img), 8, 3)
+            cv.CvtColor(self.img, hsv_img, cv.CV_BGR2HSV)
 
-            #limit all pixels that don't match our criteria, in this case we are
-            #looking for purple but if you want you can adjust the first value in
-            #both turples which is the hue range(120,140).  OpenCV uses 0-180 as
-            #a hue range for the HSV color model
-            # Orange  0-22
-            # Yellow 22- 38
-            # Green 38-75
-            # Blue 75-130
-            # Violet 130-160
-            # Red 160-179
             thresholded_img = cv.CreateImage(cv.GetSize(hsv_img), 8, 1)
-            cv.InRangeS(hsv_img, (0, 0, 0), (255, 70, 70), thresholded_img)
+            cv.InRangeS(hsv_img, self.colorLower, self.colorUpper, thresholded_img)
 
             #determine the objects moments and check that the area is large
             #enough to be our object
@@ -140,7 +182,7 @@ class Target:
             area = cv.GetCentralMoment(moments, 0, 0)
 
             #there can be noise in the video so ignore objects with small areas
-            if(area > 5000000):
+            if(area > self.area):
                 #determine the x and y coordinates of the center of the object
                 #we are tracking by dividing the 1, 0 and 0, 1 moments by the area
                 x = cv.GetSpatialMoment(moments, 1, 0)/area
@@ -159,28 +201,28 @@ class Target:
                     self.sendFire()
 
                 #create an overlay to mark the center of the tracked object
-                overlay = cv.CreateImage(cv.GetSize(img), 8, 3)
+                overlay = cv.CreateImage(cv.GetSize(self.img), 8, 3)
 
                 cv.Circle(overlay, (int(x), int(y)), 2, (255, 255, 255), 20)
-                cv.Add(img, overlay, img)
+                cv.Add(self.img, overlay, self.img)
                 #add the thresholded image back to the img so we can see what was
                 #left after it was applied
-                cv.Merge(thresholded_img, None, None, None, img)
-            else:
+                cv.Merge(thresholded_img, None, None, None, self.img)
+            elif self.dmx:
                 self.moveDmxTo(self.dmxCoordinate, False)
 
+            cv.SetMouseCallback("Target", self.mouse_callback, self.img)
             #display the image
-            cv.ShowImage("Target", img)
-
-            del(img)
-            del(hsv_img)
-            del(thresholded_img)
+            cv.ShowImage("Target", self.img)
 
             if cv.WaitKey(150) == 27:
+                del(self.img)
+                del(hsv_img)
+                del(thresholded_img)
                 del self.capture
                 # close socket connection
                 print >>sys.stderr, 'closing socket'
-                sock.close()
+                self.sock.close()
 
                 break
 
